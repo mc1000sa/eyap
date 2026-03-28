@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>열린학원 프리미엄 통합 성적 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .grade-btn.active { background-color: #1e3a8a; color: white; border-color: #1e3a8a; font-weight: 800; }
+        
+        /* 커스텀 가로 스크롤바 */
+        .custom-scrollbar::-webkit-scrollbar { height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        /* --- 스마트 인쇄 전용 스타일 --- */
+        @media print {
+            @page { margin: 10mm; } /* 방향(가로/세로)은 JS에서 동적으로 주입합니다 */
+            body { 
+                background-color: white !important; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important;
+            }
+            .print-hidden { display: none !important; }
+            
+            /* 대시보드 인쇄 모드 */
+            body.printing-dashboard header,
+            body.printing-dashboard #tab-report,
+            body.printing-dashboard #tab-admin,
+            body.printing-dashboard .dashboard-no-print { display: none !important; }
+            
+            body.printing-dashboard .dashboard-print-only { display: flex !important; }
+            body.printing-dashboard #tab-dashboard { display: block !important; padding: 0 !important; margin: 0 !important; }
+            body.printing-dashboard #tab-dashboard > div { box-shadow: none !important; border: none !important; margin-bottom: 0 !important; }
+            
+            /* 테이블 인쇄 최적화 */
+            body.printing-dashboard table { width: 100% !important; border-collapse: collapse !important; }
+            body.printing-dashboard th, body.printing-dashboard td { 
+                border: 1px solid #cbd5e1 !important; 
+                padding: 6px !important; 
+                font-size: 11px !important; 
+                color: #000 !important; 
+                /* 강제 여백 제거 및 한줄 표시 */
+                min-width: 0 !important; 
+                white-space: nowrap !important;
+            }
+            body.printing-dashboard tfoot td { font-size: 12px !important; font-weight: 900 !important; border-top: 2px solid #000 !important; background-color: #f8fafc !important; }
+            body.printing-dashboard tr { page-break-inside: avoid !important; }
+
+            /* 리포트 인쇄 모드 */
+            body.printing-report header,
+            body.printing-report #tab-dashboard,
+            body.printing-report #tab-admin { display: none !important; }
+            
+            body.printing-report .print-shadow-none { box-shadow: none !important; border-top: none !important; }
+            body.printing-report #reportContent { 
+                page-break-inside: avoid; 
+                width: 100% !important; 
+                max-width: 100% !important; 
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            body.printing-report canvas { min-height: 100% !important; max-width: 100% !important; }
+        }
+        .dashboard-print-only { display: none; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800 min-h-screen">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b-4 border-indigo-900 print-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <div class="flex items-center overflow-hidden">
+                    <img 
+                        src="열린학원로고(누끼).png" 
+                        alt="열린학원 로고" 
+                        class="h-10 md:h-12 w-auto mr-3 md:mr-4 shrink-0"
+                        onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'150\' height=\'50\' viewBox=\'0 0 150 50\'%3E%3Crect width=\'150\' height=\'50\' fill=\'%231e3a8a\'/%3E%3Ctext x=\'75\' y=\'25\' dominant-baseline=\'middle\' text-anchor=\'middle\' fill=\'%23ffffff\' font-family=\'sans-serif\' font-weight=\'bold\' font-size=\'20\'%3E열린학원%3C/text%3E%3C/svg%3E';"
+                    />
+                    <div class="flex flex-col truncate">
+                        <div class="flex items-center">
+                            <span class="text-indigo-950 font-extrabold text-base md:text-lg tracking-tight whitespace-nowrap">고등부 수학과 <span id="ui-grade-title" class="text-blue-600 ml-1"></span> <span id="ui-exam-title" class="ml-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md text-sm border border-indigo-100"></span></span>
+                            <span id="cloudStatus" class="ml-2 px-2 py-0.5 md:py-1 bg-yellow-100 text-yellow-800 text-[10px] md:text-xs font-bold rounded-full whitespace-nowrap">☁️ 시스템 준비 중...</span>
+                        </div>
+                        <span class="text-gray-500 text-xs font-medium mt-0.5 whitespace-nowrap">프리미엄 입시 및 성적 분석 시스템</span>
+                    </div>
+                </div>
+                <div class="flex space-x-1 md:space-x-2 shrink-0 ml-4">
+                    <button id="btn-tab-dashboard" onclick="window.switchTab('dashboard')" class="px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold transition-colors bg-indigo-900 text-white flex items-center whitespace-nowrap shadow-sm hover:bg-indigo-800">
+                        <i data-lucide="bar-chart-2" class="w-4 h-4 mr-1"></i> 전체성적
+                    </button>
+                    <button id="btn-tab-report" onclick="window.switchTab('report')" class="px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold transition-colors text-gray-600 hover:bg-gray-100 flex items-center whitespace-nowrap">
+                        <i data-lucide="award" class="w-4 h-4 mr-1"></i> 분석리포트
+                    </button>
+                    <button id="btn-tab-admin" onclick="window.switchTab('admin')" class="px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold transition-colors text-gray-600 hover:bg-gray-100 flex items-center whitespace-nowrap">
+                        <i data-lucide="database" class="w-4 h-4 mr-1"></i> 데이터관리
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 시험 종류 & 학년 탭 -->
+            <div class="flex pb-4 justify-center md:justify-start items-center w-full gap-4 flex-wrap">
+                <div class="flex bg-gray-100 p-1 rounded-lg shadow-inner" id="exam-selector">
+                    <button onclick="window.handleExamClick('중간 실전대비')" class="exam-btn px-4 py-1.5 rounded-md text-xs font-bold transition-all bg-white text-indigo-800 shadow-sm" id="btn-exam-중간실전대비">중간 실전대비</button>
+                    <button onclick="window.handleExamClick('Final 기출')" class="exam-btn px-4 py-1.5 rounded-md text-xs font-bold transition-all text-gray-500 hover:text-gray-700" id="btn-exam-Final기출">Final 기출</button>
+                    <!-- 수최T 쌍둥이 탭 (비밀번호 보호) -->
+                    <button onclick="window.handleExamClick('수최T 쌍둥이')" class="exam-btn px-4 py-1.5 rounded-md text-xs font-bold transition-all text-gray-500 hover:text-gray-700 flex items-center" id="btn-exam-수최T쌍둥이">
+                        <i data-lucide="lock" class="w-3 h-3 mr-1" id="icon-secret-lock"></i> 수최T 쌍둥이
+                    </button>
+                </div>
+
+                <div class="h-6 w-px bg-gray-300 hidden md:block"></div>
+
+                <div class="flex space-x-2" id="grade-selector">
+                    <button onclick="window.changeGrade('고1')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold active shadow-sm" id="btn-고1">고1</button>
+                    <button onclick="window.changeGrade('고2')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold shadow-sm" id="btn-고2">고2</button>
+                    <button onclick="window.changeGrade('고3')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold shadow-sm" id="btn-고3">고3</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:py-0 print:m-0">
+        
+        <!-- 1. 전체성적 탭 -->
+        <div id="tab-dashboard" class="space-y-6">
+            <!-- 필터 섹션 -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 dashboard-no-print">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center text-indigo-900 font-bold">
+                        <i data-lucide="filter" class="w-5 h-5 mr-2"></i> 맞춤형 성적 조회 필터
+                    </div>
+                    <!-- 🖨️ 대시보드 전용 출력 버튼 추가 -->
+                    <button onclick="window.printDashboard()" class="px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg shadow-sm text-sm font-bold hover:bg-indigo-100 hover:text-indigo-900 flex items-center transition-colors">
+                        <i data-lucide="printer" class="w-4 h-4 mr-2"></i> 리스트 출력
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1 flex items-center"><i data-lucide="user" class="w-4 h-4 mr-1"></i>이름</label>
+                        <select id="filterName" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border outline-none text-sm"></select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1 flex items-center"><i data-lucide="school" class="w-4 h-4 mr-1"></i>학교+학년</label>
+                        <select id="filterSchoolGrade" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border outline-none text-sm"></select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1 flex items-center"><i data-lucide="user-circle" class="w-4 h-4 mr-1"></i>담당T</label>
+                        <select id="filterTeacher" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border outline-none text-sm"></select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1 flex items-center"><i data-lucide="book-open" class="w-4 h-4 mr-1"></i>학원반</label>
+                        <select id="filterClass" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border outline-none text-sm"></select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 요약 박스 3개 (출력 시 숨김) -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 dashboard-no-print">
+                <!-- 요약 통계 -->
+                <div class="col-span-1 bg-gradient-to-br from-indigo-800 to-blue-900 text-white p-6 rounded-xl shadow-md flex flex-col justify-center relative overflow-hidden">
+                    <div class="absolute -right-4 -bottom-4 opacity-10"><i data-lucide="trending-up" class="w-32 h-32"></i></div>
+                    <h3 class="text-blue-100 font-medium mb-2 relative z-10 text-sm">필터링된 학생 수</h3>
+                    <p class="text-4xl font-extrabold mb-6 relative z-10"><span id="filteredCount">0</span> <span class="text-lg font-normal">명</span></p>
+                    <h3 class="text-blue-100 font-medium mb-2 relative z-10 text-sm">최근 회차 평균 점수</h3>
+                    <p class="text-4xl font-extrabold relative z-10"><span id="recentAvg">0</span> <span class="text-lg font-normal">점</span></p>
+                </div>
+
+                <!-- 반별 요약 -->
+                <div id="classSummaryContainer" class="col-span-1 lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+                    <div class="text-gray-500 text-center w-full p-8">데이터를 불러오는 중입니다...</div>
+                </div>
+            </div>
+
+            <!-- 대시보드 인쇄 전용 헤더 (화면에서는 안 보임) -->
+            <div id="dashboardPrintHeader" class="dashboard-print-only mb-6 flex justify-between items-end border-b-2 border-gray-800 pb-4">
+                <div>
+                    <h1 id="dashboardPrintTitle" class="text-2xl font-extrabold text-black tracking-tight"></h1>
+                    <p class="text-gray-500 font-bold text-sm mt-1">열린학원 고등부 수학과 프리미엄 성적 시스템</p>
+                </div>
+                <!-- 텍스트 중복을 피하기 위해 로고 이미지만 삽입 -->
+                <img src="열린학원로고(누끼).png" alt="" class="h-10 object-contain" onerror="this.style.display='none';" />
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden print-shadow-none">
+                <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 dashboard-no-print">
+                    <h3 class="text-lg font-bold text-gray-800">학생 상세 성적 목록</h3>
+                    <span class="text-xs text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md font-bold border border-indigo-100">항목을 클릭하면 오름/내림차순 정렬됩니다</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left" style="table-layout: auto;">
+                        <thead class="bg-gray-50 text-gray-600 font-medium border-b">
+                            <tr id="tableHeaderRow">
+                                <!-- JS 동적 생성 -->
+                            </tr>
+                        </thead>
+                        <tbody id="dashboardTableBody"></tbody>
+                        <!-- 🖨️ 하단 통계 푸터 (동적으로 전체평균 삽입) -->
+                        <tfoot id="dashboardTableFoot" class="hidden"></tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 개별 성적표 탭 -->
+        <div id="tab-report" class="space-y-6 print:space-y-0 hidden">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 print-hidden flex flex-col md:flex-row items-end space-y-4 md:space-y-0 md:space-x-4">
+                <div class="flex-1 w-full max-w-md">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">학생 이름 검색</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i data-lucide="search" class="h-5 w-5 text-gray-400"></i>
+                        </div>
+                        <input type="text" id="searchName" class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm outline-none font-medium" placeholder="학생 이름을 입력하세요 (예: 김민수)" onkeypress="if(event.key === 'Enter') window.handleSearch()" />
+                    </div>
+                </div>
+                <button onclick="window.handleSearch()" class="w-full md:w-auto bg-indigo-900 hover:bg-indigo-800 text-white px-8 py-3 rounded-lg font-bold transition-colors shadow-sm flex items-center justify-center">
+                    <i data-lucide="file-text" class="w-5 h-5 mr-2"></i> 리포트 생성
+                </button>
+            </div>
+
+            <div id="reportEmpty" class="bg-white p-12 md:p-20 rounded-xl shadow-sm border border-gray-100 text-center print-hidden">
+                <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-indigo-50 text-indigo-800 mb-6 shadow-inner">
+                    <i data-lucide="award" class="w-10 h-10"></i>
+                </div>
+                <h3 class="text-2xl font-extrabold text-gray-800 mb-3">프리미엄 성적 분석 리포트</h3>
+                <p class="text-gray-500 font-medium">이름을 검색하면 학부모님께 바로 전송 가능한 전문가 수준의 깔끔한 성적표가 생성됩니다.</p>
+            </div>
+
+            <!-- 성적표 출력 영역 -->
+            <div id="reportContent" class="hidden bg-white p-8 md:p-12 rounded-2xl shadow-lg border-t-8 border-indigo-900 max-w-4xl mx-auto print-shadow-none print-p-0 print:border-none relative">
+                
+                <!-- 트렌디한 백그라운드 효과 (프린트시 숨김) -->
+                <div class="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 -z-10 pointer-events-none print-hidden transform translate-x-1/2 -translate-y-1/2"></div>
+                
+                <div class="flex justify-between items-start border-b-2 border-gray-200 pb-6 mb-8 print:pb-4 print:mb-6">
+                    <div>
+                        <!-- 그라데이션 텍스트로 프리미엄 느낌 강조 -->
+                        <h1 class="text-3xl print:text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-900 to-blue-700 mb-2 print:mb-1 tracking-tight"><span id="report-exam-title"></span> 분석 리포트</h1>
+                        <p class="text-gray-500 font-bold print:text-sm tracking-wide">열린학원 고등부 수학과 <span id="report-grade-title" class="text-indigo-600"></span></p>
+                    </div>
+                    <!-- 텍스트 중복 방지를 위해 alt 비움 -->
+                    <img src="열린학원로고(누끼).png" alt="" class="h-16 print:h-12 object-contain" onerror="this.style.display='none';" />
+                </div>
+
+                <div class="flex justify-between items-center bg-gray-50 p-6 print:p-4 rounded-xl mb-8 print:mb-6 border border-gray-200 shadow-sm print:shadow-none">
+                    <div class="grid grid-cols-2 md:grid-cols-4 print:grid-cols-4 gap-6 print:gap-4 w-full">
+                        <div>
+                            <p class="text-xs text-indigo-500 font-bold uppercase tracking-wider mb-1">Student</p>
+                            <p id="reportName" class="text-xl print:text-lg font-extrabold text-gray-900"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-indigo-500 font-bold uppercase tracking-wider mb-1">School</p>
+                            <p id="reportSchool" class="text-lg print:text-base font-bold text-gray-800"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-indigo-500 font-bold uppercase tracking-wider mb-1">Class</p>
+                            <p id="reportClass" class="text-lg print:text-base font-bold text-gray-800"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-indigo-500 font-bold uppercase tracking-wider mb-1">Teacher</p>
+                            <p id="reportTeacher" class="text-lg print:text-base font-bold text-gray-800"></p>
+                        </div>
+                    </div>
+                    <!-- 🖨️ 개별 리포트 인쇄 함수 연결 -->
+                    <button onclick="window.printReport()" class="print-hidden ml-4 p-3 bg-white text-indigo-900 border border-indigo-200 rounded-full hover:bg-indigo-900 hover:text-white transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-900">
+                        <i data-lucide="printer" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-8 print:gap-6 mb-8 print:mb-2">
+                    <!-- 성적 그래프 -->
+                    <div class="bg-white p-6 print:p-4 rounded-xl border border-gray-200 shadow-sm print:shadow-none flex flex-col h-full relative overflow-hidden">
+                        <h3 class="text-lg print:text-base font-extrabold text-gray-800 mb-4 print:mb-2 flex items-center z-10">
+                            <i data-lucide="line-chart" class="w-5 h-5 mr-2 text-indigo-600"></i> 성적 변화 추이
+                        </h3>
+                        <div class="relative flex-1 min-h-[220px] print:min-h-[180px] z-10">
+                            <canvas id="reportChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col space-y-4 print:space-y-4">
+                        <!-- 개인 성적 테이블 -->
+                        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm print:shadow-none">
+                            <table class="w-full text-center">
+                                <thead class="bg-indigo-900 text-white">
+                                    <tr>
+                                        <th class="py-3 print:py-2 px-4 text-sm font-bold tracking-wide">응시 회차</th>
+                                        <th class="py-3 print:py-2 px-4 text-sm font-bold tracking-wide">취득 점수</th>
+                                        <th class="py-3 print:py-2 px-4 text-sm font-bold tracking-wide">석차/등수</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="reportScoresTable" class="divide-y divide-gray-100 text-sm print:text-base font-medium"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- 반 평균 테이블 -->
+                        <div class="bg-blue-50/50 p-5 print:p-4 rounded-xl border border-blue-100 flex-1">
+                            <h3 class="text-md print:text-sm font-bold text-blue-900 mb-3 print:mb-2 flex items-center">
+                                <i data-lucide="users" class="w-4 h-4 mr-2"></i> 
+                                <span id="reportClassNameTitle"></span> 그룹 회차별 평균
+                            </h3>
+                            <div class="bg-white rounded-lg border border-blue-100 overflow-hidden shadow-sm print:shadow-none">
+                                <table class="w-full text-center text-sm print:text-base">
+                                    <thead class="bg-blue-100/50 text-blue-900">
+                                        <tr>
+                                            <th class="py-2 px-3 font-bold">응시 회차</th>
+                                            <th class="py-2 px-3 font-bold">반 평균 점수</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="reportClassAvgTable" class="divide-y divide-gray-50 font-medium"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-center mt-12 print:mt-8 pt-6 print:pt-4 border-t border-gray-200 flex flex-col items-center">
+                    <img src="열린학원로고(누끼).png" alt="열린학원 로고" class="h-10 print:h-8 mb-2 opacity-80" onerror="this.style.display='none';" />
+                    <p class="text-sm print:text-xs text-gray-500 font-bold">Since 1996 | 고등부 수학 입시 전문 열린학원</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 데이터 관리 탭 -->
+        <div id="tab-admin" class="space-y-6 hidden print-hidden">
+            <div class="bg-white p-8 rounded-xl shadow-sm border border-gray-200 border-dashed text-center relative overflow-hidden">
+                <div class="absolute -left-10 -top-10 opacity-5"><i data-lucide="database" class="w-64 h-64 text-indigo-600"></i></div>
+                <div class="max-w-xl mx-auto relative z-10">
+                    <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 mb-4 shadow-sm">
+                        <i data-lucide="link" class="w-8 h-8"></i>
+                    </div>
+                    <h3 class="text-xl font-extrabold text-gray-800 mb-2"><span class="text-indigo-600 border-b-2 border-indigo-200" id="admin-exam-title"></span> 구글 시트 실시간 연동</h3>
+                    <p class="text-gray-500 text-sm mb-6 font-medium">
+                        (<span class="text-indigo-600 font-bold" id="admin-grade-title">고1</span> 전용 데이터 공간)<br/>
+                        학원 마스터 구글 스프레드시트 링크를 붙여넣어주세요.<br/>
+                    </p>
+                    
+                    <div class="flex flex-col space-y-3">
+                        <input type="text" id="sheetUrlInput" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm outline-none text-sm font-medium" placeholder="https://docs.google.com/spreadsheets/d/.../edit" />
+                        
+                        <button onclick="window.syncGoogleSheet()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-bold transition-colors shadow-sm w-full flex items-center justify-center">
+                            <i data-lucide="refresh-cw" class="w-5 h-5 mr-2"></i> 스마트 데이터 연동 및 갱신
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <h3 class="text-lg font-bold text-gray-800 flex items-center"><i data-lucide="cloud" class="w-5 h-5 mr-2 text-indigo-600"></i>클라우드 동기화 상태</h3>
+                    <button onclick="window.clearAllData()" class="bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 px-4 py-2 rounded-lg text-sm font-bold transition-colors border border-red-200 flex items-center shadow-sm">
+                        <i data-lucide="trash-2" class="w-4 h-4 mr-1"></i>데이터 전체 초기화
+                    </button>
+                </div>
+                <div class="p-4 bg-indigo-50/50 text-indigo-800 text-xs text-center border-b border-indigo-100 font-medium leading-relaxed">
+                    * 새롭게 구글 시트 링크를 연동하면, 기존에 저장된 학생 성적은 모두 최신 시트 내용으로 자동 업데이트 됩니다.
+                </div>
+                <ul id="fileList" class="divide-y divide-gray-100"></ul>
+            </div>
+        </div>
+    </main>
+
+    <!-- 프리미엄 커스텀 모달 (공용) -->
+    <div id="customModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-gray-900 bg-opacity-60 backdrop-blur-sm flex items-center justify-center print-hidden transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 transform transition-all scale-100">
+            <div id="modalIcon" class="mx-auto flex items-center justify-center h-16 w-16 rounded-full mb-5 shadow-inner"></div>
+            <h3 id="modalTitle" class="text-xl leading-6 font-extrabold text-gray-900 text-center mb-2"></h3>
+            <div class="mt-2 mb-6">
+                <p id="modalMessage" class="text-sm text-gray-600 text-center break-words font-medium leading-relaxed"></p>
+            </div>
+            <div id="modalButtons" class="flex justify-center gap-3"></div>
+        </div>
+    </div>
+
+    <!-- 🔑 비밀번호 입력 전용 시크릿 모달 -->
+    <div id="passwordModal" class="hidden fixed inset-0 z-[60] overflow-y-auto bg-gray-900 bg-opacity-70 backdrop-blur-md flex items-center justify-center print-hidden transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 transform transition-all scale-100 border-t-8 border-indigo-900">
+            <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-indigo-50 text-indigo-600 mb-4 border border-indigo-100 shadow-inner">
+                <i data-lucide="lock" class="w-8 h-8"></i>
+            </div>
+            <h3 class="text-xl leading-6 font-extrabold text-gray-900 text-center mb-2">수최T 전용 시크릿 공간</h3>
+            <p class="text-sm text-gray-500 text-center font-bold mb-6">인가된 선생님만 접근할 수 있는 데이터입니다.<br/>비밀번호를 입력해주세요.</p>
+            <div class="mb-6 relative">
+                <input type="password" id="secretPassword" class="w-full text-center tracking-[0.5em] text-xl font-extrabold px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-indigo-600 focus:border-indigo-600 shadow-inner outline-none transition-colors" placeholder="••••" onkeypress="if(event.key === 'Enter') window.verifyPassword()" />
+            </div>
+            <div class="flex justify-center gap-3">
+                <button onclick="window.closePasswordModal()" class="w-full rounded-xl border border-gray-300 px-4 py-3 bg-white text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors shadow-sm">돌아가기</button>
+                <button onclick="window.verifyPassword()" class="w-full rounded-xl border border-transparent px-4 py-3 bg-indigo-900 text-sm font-bold text-white hover:bg-indigo-800 transition-colors shadow-sm flex items-center justify-center">
+                    <i data-lucide="key" class="w-4 h-4 mr-2"></i> 잠금 해제
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ☁️ 클라우드(Firebase) 연결 스크립트 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // =========================================================================
+        // ⚙️ [전역 변수 설정] 
+        window.CURRENT_EXAM = '중간 실전대비'; // 탭 이름 변경 적용
+        window.CURRENT_GRADE = '고1'; 
+        
+        window.currentSortCol = '이름'; 
+        window.currentSortAsc = true; 
+        
+        // 🔑 시크릿 공간 비밀번호 설정 (초기값: 1234)
+        window.SECRET_PASSWORD = '1234';
+        window.isSecretUnlocked = false;
+        // =========================================================================
+        
+        // ☁️ [클라우드 설정 (Firebase)]
+        const firebaseConfig = {
+            apiKey: "AIzaSyCLOFANzXKCursu8SRf94_uAwDzctN3hgc",
+            authDomain: "openaca-c4436.firebaseapp.com",
+            projectId: "openaca-c4436",
+            storageBucket: "openaca-c4436.firebasestorage.app",
+            messagingSenderId: "1051284937553",
+            appId: "1:1051284937553:web:72607d68f85e7352211170",
+            measurementId: "G-RNZJGFWY00"
+        };
+        
+        let appData = { files: [], students: [], allWeeks: [], sheetUrl: "" };
+        let unsubscribe = null;
+        let reportChartInstance = null;
+        let db, auth, appId;
+        const cloudStatus = document.getElementById('cloudStatus');
+        let isLocalMode = false;
+
+        try {
+            appId = firebaseConfig.appId;
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            // 로그인 상태를 감지하고 연동 시작
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    isLocalMode = false;
+                    listenToCloud(); 
+                } else {
+                    signInAnonymously(auth).catch(err => {
+                        console.error("Firebase Auth Error:", err);
+                        enableLocalMode('클라우드 인증 실패');
+                    });
+                }
+            });
+        } catch (error) {
+            console.error("Firebase Init Error:", error);
+            enableLocalMode('클라우드 초기화 실패');
+        }
+
+        // 🖨️ 스마트 인쇄 전용 함수들 (비율, 방향 자동 조절 기능 추가)
+        window.printDashboard = function() {
+            const weeksCount = appData.allWeeks.length;
+            let pageStyle = "";
+            let tableZoom = 1;
+
+            // 1. 가로/세로 방향 설정 및 줌 비율 계산 (스마트 핏)
+            if (weeksCount >= 4) {
+                // 4회차 이상: 무조건 가로 인쇄 모드
+                pageStyle = "@page { size: A4 landscape; margin: 10mm; }";
+                if (weeksCount >= 4) tableZoom = 0.95;
+                if (weeksCount >= 6) tableZoom = 0.85;
+                if (weeksCount >= 8) tableZoom = 0.75;
+            } else {
+                // 1~3회차: 세로 인쇄 유지하되, 짤림 방지를 위해 미세 축소
+                pageStyle = "@page { size: A4 portrait; margin: 10mm; }";
+                if (weeksCount === 2) tableZoom = 0.80; // 0.95에서 0.80으로 축소하여 2회차 짤림 완벽 해결
+                if (weeksCount === 3) tableZoom = 0.70;
+            }
+
+            // 동적으로 인쇄 스타일 주입
+            const styleEl = document.createElement('style');
+            styleEl.id = 'dynamic-print-style';
+            styleEl.innerHTML = `
+                ${pageStyle}
+                body.printing-dashboard #tab-dashboard { 
+                    zoom: ${tableZoom}; 
+                    transform-origin: top left;
+                }
+                /* 여백 타이트하게 맞추기 (Tailwind의 min-w 속성 무력화) */
+                body.printing-dashboard th:nth-child(1), body.printing-dashboard td:nth-child(1),
+                body.printing-dashboard th:nth-child(2), body.printing-dashboard td:nth-child(2),
+                body.printing-dashboard th:nth-child(3), body.printing-dashboard td:nth-child(3) {
+                    width: 1% !important; 
+                    white-space: nowrap !important;
+                }
+                /* 추가: 회차별 점수/등수 칸의 너비를 완벽히 동일하게 분배 */
+                body.printing-dashboard .session-col {
+                    width: ${90 / Math.max(1, weeksCount * 2)}% !important;
+                    white-space: nowrap !important;
+                }
+            `;
+            document.head.appendChild(styleEl);
+
+            document.body.classList.add('printing-dashboard');
+            window.print();
+            
+            setTimeout(() => {
+                document.body.classList.remove('printing-dashboard');
+                const el = document.getElementById('dynamic-print-style');
+                if (el) el.remove();
+            }, 500);
+        };
+
+        window.printReport = function() {
+            // 개별 리포트는 세로 인쇄 강제 고정
+            const styleEl = document.createElement('style');
+            styleEl.id = 'dynamic-print-style-report';
+            styleEl.innerHTML = `@page { size: A4 portrait; margin: 10mm; }`;
+            document.head.appendChild(styleEl);
+
+            document.body.classList.add('printing-report');
+            window.print();
+            
+            setTimeout(() => {
+                document.body.classList.remove('printing-report');
+                const el = document.getElementById('dynamic-print-style-report');
+                if (el) el.remove();
+            }, 500);
+        };
+
+        window.showModal = function(title, message, type, confirmCallback = null) {
+            const modal = document.getElementById('customModal');
+            document.getElementById('modalTitle').innerText = title;
+            document.getElementById('modalMessage').innerHTML = message.replace(/\n/g, '<br/>');
+            
+            const iconEl = document.getElementById('modalIcon');
+            if (type === 'error') {
+                iconEl.className = 'mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-50 text-red-600 mb-5 border border-red-100 shadow-inner';
+                iconEl.innerHTML = '<i data-lucide="alert-triangle" class="w-8 h-8"></i>';
+            } else if (type === 'success') {
+                iconEl.className = 'mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-50 text-green-600 mb-5 border border-green-100 shadow-inner';
+                iconEl.innerHTML = '<i data-lucide="check-circle" class="w-8 h-8"></i>';
+            } else {
+                iconEl.className = 'mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-indigo-50 text-indigo-600 mb-5 border border-indigo-100 shadow-inner';
+                iconEl.innerHTML = '<i data-lucide="info" class="w-8 h-8"></i>';
+            }
+
+            const btnsEl = document.getElementById('modalButtons');
+            btnsEl.innerHTML = '';
+            
+            if (confirmCallback) {
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'w-full rounded-xl border border-gray-300 px-4 py-3 bg-white text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors shadow-sm';
+                cancelBtn.innerText = '취소';
+                cancelBtn.onclick = () => modal.classList.add('hidden');
+                
+                const okBtn = document.createElement('button');
+                okBtn.className = 'w-full rounded-xl border border-transparent px-4 py-3 bg-indigo-900 text-sm font-bold text-white hover:bg-indigo-800 transition-colors shadow-sm';
+                okBtn.innerText = '확인';
+                okBtn.onclick = () => { modal.classList.add('hidden'); confirmCallback(); };
+
+                btnsEl.appendChild(cancelBtn);
+                btnsEl.appendChild(okBtn);
+            } else {
+                const okBtn = document.createElement('button');
+                okBtn.className = 'w-full rounded-xl border border-transparent px-4 py-3 bg-indigo-900 text-sm font-bold text-white hover:bg-indigo-800 transition-colors shadow-sm';
+                okBtn.innerText = '확인';
+                okBtn.onclick = () => modal.classList.add('hidden');
+                btnsEl.appendChild(okBtn);
+            }
+
+            modal.classList.remove('hidden');
+            lucide.createIcons();
+        };
+
+        // 🔑 탭 클릭 가로채기 및 시크릿 검증 로직
+        window.handleExamClick = function(exam) {
+            if (exam === '수최T 쌍둥이' && !window.isSecretUnlocked) {
+                // 잠겨있으면 모달 띄우기
+                const pwdModal = document.getElementById('passwordModal');
+                const pwdInput = document.getElementById('secretPassword');
+                pwdModal.classList.remove('hidden');
+                pwdInput.value = '';
+                // 애니메이션 딜레이 후 포커스
+                setTimeout(() => pwdInput.focus(), 100);
+            } else {
+                // 잠금 해제되어 있거나, 다른 탭이면 바로 이동
+                window.changeExam(exam);
+            }
+        };
+
+        window.verifyPassword = function() {
+            const inputVal = document.getElementById('secretPassword').value;
+            if (inputVal === window.SECRET_PASSWORD) {
+                // 성공!
+                window.isSecretUnlocked = true;
+                document.getElementById('passwordModal').classList.add('hidden');
+                
+                // 자물쇠 아이콘 열림 상태로 변경
+                const lockIcon = document.getElementById('icon-secret-lock');
+                if(lockIcon) lockIcon.setAttribute('data-lucide', 'unlock');
+                lucide.createIcons();
+                
+                // 탭 이동
+                window.changeExam('수최T 쌍둥이');
+            } else {
+                // 실패
+                window.showModal('접근 거부', '비밀번호가 일치하지 않습니다.\n권한이 있는 선생님만 접근 가능합니다.', 'error');
+                document.getElementById('secretPassword').value = '';
+                document.getElementById('secretPassword').focus();
+            }
+        };
+
+        window.closePasswordModal = function() {
+            document.getElementById('passwordModal').classList.add('hidden');
+        };
+
+        window.sortTable = function(colName) {
+            if (window.currentSortCol === colName) {
+                window.currentSortAsc = !window.currentSortAsc; 
+            } else {
+                window.currentSortCol = colName;
+                window.currentSortAsc = false; 
+            }
+            updateDashboard();
+        };
+
+        window.changeExam = function(exam) {
+            window.CURRENT_EXAM = exam;
+            // ID에 공백이 들어가면 안되므로 공백 제거한 안전한 ID 사용
+            const safeId = exam.replace(/\s+/g, '');
+            
+            document.querySelectorAll('.exam-btn').forEach(btn => {
+                btn.classList.remove('bg-white', 'text-indigo-800', 'shadow-sm');
+                btn.classList.add('text-gray-500');
+            });
+            const activeBtn = document.getElementById(`btn-exam-${safeId}`);
+            if(activeBtn) {
+                activeBtn.classList.remove('text-gray-500');
+                activeBtn.classList.add('bg-white', 'text-indigo-800', 'shadow-sm');
+            }
+
+            document.getElementById('ui-exam-title').innerText = exam;
+            document.getElementById('report-exam-title').innerText = exam;
+            document.getElementById('admin-exam-title').innerText = exam;
+            
+            resetAndFetchData();
+        };
+
+        window.changeGrade = function(grade) {
+            window.CURRENT_GRADE = grade;
+            
+            document.querySelectorAll('.grade-btn').forEach(btn => btn.classList.remove('active'));
+            const activeBtn = document.getElementById(`btn-${grade}`);
+            if(activeBtn) activeBtn.classList.add('active');
+
+            document.getElementById('ui-grade-title').innerText = `[${grade}]`;
+            document.getElementById('report-grade-title').innerText = `[${grade}]`;
+            document.getElementById('admin-grade-title').innerText = `${grade}`;
+            
+            resetAndFetchData();
+        };
+
+        function resetAndFetchData() {
+            document.title = `열린학원 ${window.CURRENT_GRADE} ${window.CURRENT_EXAM} 시스템`;
+            
+            appData = { files: [], students: [], allWeeks: [], sheetUrl: "" };
+            
+            const searchInput = document.getElementById('searchName');
+            if(searchInput) searchInput.value = '';
+            
+            const reportEmpty = document.getElementById('reportEmpty');
+            const reportContent = document.getElementById('reportContent');
+            if(reportEmpty) reportEmpty.classList.remove('hidden');
+            if(reportContent) reportContent.classList.add('hidden');
+            
+            document.getElementById('sheetUrlInput').value = '';
+
+            setupFilters();
+            updateDashboard();
+            renderFiles();
+
+            if (isLocalMode) {
+                enableLocalMode('로컬 모드 유지');
+            } else {
+                listenToCloud();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('ui-exam-title').innerText = window.CURRENT_EXAM;
+            document.getElementById('report-exam-title').innerText = window.CURRENT_EXAM;
+            document.getElementById('admin-exam-title').innerText = window.CURRENT_EXAM;
+            
+            document.getElementById('ui-grade-title').innerText = `[${window.CURRENT_GRADE}]`;
+            document.getElementById('report-grade-title').innerText = `[${window.CURRENT_GRADE}]`;
+            document.getElementById('admin-grade-title').innerText = `${window.CURRENT_GRADE}`;
+            
+            window.changeGrade(window.CURRENT_GRADE);
+            lucide.createIcons();
+        });
+
+        function enableLocalMode(reason) {
+            isLocalMode = true;
+            cloudStatus.innerText = `⚠️ 단독 모드 (${reason})`;
+            cloudStatus.className = 'ml-2 px-2 py-0.5 md:py-1 bg-gray-100 text-gray-700 text-[10px] md:text-xs font-bold rounded-full whitespace-nowrap border border-gray-200';
+            const saved = localStorage.getItem(`yeollin_local_${window.CURRENT_EXAM}_${window.CURRENT_GRADE}`);
+            if(saved) {
+                try { 
+                    appData = JSON.parse(saved); 
+                    if(appData.sheetUrl) document.getElementById('sheetUrlInput').value = appData.sheetUrl;
+                } catch(e) { appData = { files: [], students: [], allWeeks: [], sheetUrl: "" }; }
+            } else {
+                appData = { files: [], students: [], allWeeks: [], sheetUrl: "" };
+            }
+            setupFilters();
+            updateDashboard();
+            renderFiles();
+        }
+
+        function listenToCloud() {
+            if (!db || !auth || !auth.currentUser || isLocalMode) return;
+            
+            if (unsubscribe) unsubscribe(); 
+            
+            cloudStatus.innerText = '☁️ 데이터 동기화 중...';
+            cloudStatus.className = 'ml-2 px-2 py-0.5 md:py-1 bg-yellow-50 text-yellow-700 text-[10px] md:text-xs font-bold rounded-full whitespace-nowrap border border-yellow-200';
+            
+            // DB 컬렉션 경로는 공백을 제거하여 안전하게 구성
+            const safeDbCollectionName = `YeollinMath_${window.CURRENT_EXAM.replace(/\s+/g, '')}`;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', safeDbCollectionName, window.CURRENT_GRADE);
+            
+            unsubscribe = onSnapshot(docRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    try {
+                        appData = JSON.parse(snapshot.data().payload);
+                        if(appData.sheetUrl) {
+                            const urlEl = document.getElementById('sheetUrlInput');
+                            if(urlEl) urlEl.value = appData.sheetUrl;
+                        }
+                    } catch(e) { console.error("Data parse error:", e); }
+                } else {
+                    appData = { files: [], students: [], allWeeks: [], sheetUrl: "" };
+                }
+                
+                cloudStatus.innerText = '☁️ 클라우드 연결 완료';
+                cloudStatus.className = 'ml-2 px-2 py-0.5 md:py-1 bg-green-50 text-green-700 text-[10px] md:text-xs font-bold rounded-full whitespace-nowrap border border-green-200';
+                
+                setupFilters();
+                updateDashboard();
+                renderFiles();
+            }, (err) => {
+                console.error("Snapshot error:", err);
+                enableLocalMode('접근 권한 없음');
+            });
+        }
+
+        async function saveToCloud() {
+            const localKey = `yeollin_local_${window.CURRENT_EXAM}_${window.CURRENT_GRADE}`;
+            const saveLocalBackup = () => {
+                try {
+                    localStorage.setItem(localKey, JSON.stringify(appData));
+                } catch (e) {
+                    console.error('Local backup save failed:', e);
+                }
+            };
+
+            if (auth && auth.currentUser && !isLocalMode) {
+                cloudStatus.innerText = '☁️ 클라우드 저장 중...';
+                cloudStatus.className = 'ml-2 px-2 py-0.5 md:py-1 bg-yellow-50 text-yellow-700 text-[10px] md:text-xs font-bold rounded-full whitespace-nowrap border border-yellow-200';
+
+                const safeDbCollectionName = `YeollinMath_${window.CURRENT_EXAM.replace(/\s+/g, '')}`;
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', safeDbCollectionName, window.CURRENT_GRADE);
+
+                try {
+                    await Promise.race([
+                        setDoc(docRef, {
+                            payload: JSON.stringify(appData),
+                            updatedAt: new Date().toISOString()
+                        }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('클라우드 저장 시간 초과')), 5000))
+                    ]);
+
+                    cloudStatus.innerText = '☁️ 클라우드 저장 완료';
+                    cloudStatus.className = 'ml-2 px-2 py-0.5 md:py-1 bg-green-50 text-green-700 text-[10px] md:text-xs font-bold rounded-full whitespace-nowrap border border-green-200';
+                    saveLocalBackup();
+                } catch (err) {
+                    console.error('Cloud save failed:', err);
+                    saveLocalBackup();
+                    enableLocalMode('클라우드 저장 지연');
+                }
+            } else {
+                saveLocalBackup();
+            }
+        }
+
+        function getVal(row, possibleKeys) {
+            const rowKeys = Object.keys(row);
+            const foundKey = rowKeys.find(k => {
+                const ck = k.toString().replace(/\s/g, '').toLowerCase();
+                return possibleKeys.some(key => ck.includes(key));
+            });
+            return foundKey ? row[foundKey] : '';
+        }
+
+        const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwX_mmEvnCeCBBwgJxFWAaI3W7i5hU9QBArgp-RXwYXmxzPOKkDVuy5NJP09Fq8WaTc/exec";
+
+        function parseSpreadsheetInfo(inputUrl) {
+            const url = String(inputUrl || '').trim();
+            const idMatch = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+            if (!idMatch) throw new Error('올바른 구글 스프레드시트 링크 형식이 아닙니다.');
+
+            const spreadsheetId = idMatch[1];
+            const gidMatch = url.match(/[?#&]gid=([0-9]+)/);
+            const gid = gidMatch ? gidMatch[1] : '';
+            return { spreadsheetId, gid, originalUrl: url };
+        }
+
+        function fetchSpreadsheetViaAppsScript(spreadsheetUrl) {
+            return new Promise((resolve, reject) => {
+                if (!APPS_SCRIPT_WEB_APP_URL || APPS_SCRIPT_WEB_APP_URL.includes('PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE')) {
+                    reject(new Error('Apps Script 웹앱 URL이 아직 설정되지 않았습니다.'));
+                    return;
+                }
+
+                let info;
+                try {
+                    info = parseSpreadsheetInfo(spreadsheetUrl);
+                } catch (err) {
+                    reject(err);
+                    return;
+                }
+
+                const callbackName = `yeollinJsonp_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+                const cleanup = (scriptEl) => {
+                    try { delete window[callbackName]; } catch (e) { window[callbackName] = undefined; }
+                    if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+                };
+
+                const timer = setTimeout(() => {
+                    cleanup(script);
+                    reject(new Error('데이터를 불러오는데 시간이 너무 오래 걸립니다. 시트 주소를 확인해주세요.'));
+                }, 20000);
+
+                window[callbackName] = (payload) => {
+                    clearTimeout(timer);
+                    cleanup(script);
+                    if (!payload || payload.ok !== true) {
+                        reject(new Error((payload && payload.error) || '데이터를 가져오지 못했습니다. 권한을 확인해주세요.'));
+                        return;
+                    }
+                    resolve(payload);
+                };
+
+                const qs = new URLSearchParams({
+                    spreadsheetId: info.spreadsheetId,
+                    spreadsheetUrl: info.originalUrl,
+                    sheetName: 'web',
+                    gid: info.gid,
+                    callback: callbackName,
+                    _: String(Date.now())
+                });
+
+                const script = document.createElement('script');
+                script.src = `${APPS_SCRIPT_WEB_APP_URL}${APPS_SCRIPT_WEB_APP_URL.includes('?') ? '&' : '?'}${qs.toString()}`;
+                script.async = true;
+                script.onerror = () => {
+                    clearTimeout(timer);
+                    cleanup(script);
+                    reject(new Error('서버 연결에 실패했습니다.'));
+                };
+                document.body.appendChild(script);
+            });
+        }
+
+        function processRawSpreadsheetRows(rawArray, sourceLabel = '스마트 시트 연동') {
+            if (!rawArray || rawArray.length === 0 || !Array.isArray(rawArray[0])) {
+                throw new Error('시트에 데이터가 없거나 접근할 수 없습니다.');
+            }
+
+            let headerRowIndex = 0;
+            let foundHeader = false;
+            for (let i = 0; i < Math.min(rawArray.length, 30); i++) {
+                const rowArr = rawArray[i] || [];
+                const hasNameCol = rowArr.some(cell => {
+                    if (!cell) return false;
+                    const c = String(cell).replace(/\s/g, '').toLowerCase();
+                    return c === '이름' || c === '성명' || c === '학생명' || c === '원생명';
+                });
+                if (hasNameCol) {
+                    headerRowIndex = i;
+                    foundHeader = true;
+                    break;
+                }
+            }
+
+            if (!foundHeader) {
+                throw new Error(`데이터 윗부분에서 [이름]칸을 찾지 못했습니다.\n시트 상단에 이름/학교/담당T/학원반/점수 항목이 있는지 확인해주세요.`);
+            }
+
+            let aboveRows = [];
+            for (let i = 0; i < headerRowIndex; i++) {
+                aboveRows.push(rawArray[i] || []);
+            }
+
+            let bottomRow = rawArray[headerRowIndex] || [];
+            let actualHeaders = [];
+            
+            let scoreCounter = 0;
+            let rankCounter = 0;
+            let lastAboveWeek = '';
+
+            for (let c = 0; c < bottomRow.length; c++) {
+                let colName = bottomRow[c] ? String(bottomRow[c]).trim() : ``;
+                
+                let aboveWeek = '';
+                for (let r = 0; r < aboveRows.length; r++) {
+                    let cellVal = aboveRows[r][c] ? String(aboveRows[r][c]).trim() : '';
+                    if (cellVal && cellVal.match(/\d+(회|주)/)) {
+                        aboveWeek = cellVal;
+                        break;
+                    }
+                }
+                
+                if (aboveWeek) {
+                    lastAboveWeek = aboveWeek;
+                }
+
+                let cleanCol = colName.replace(/\s/g, '');
+                let isScore = cleanCol.includes('점수') || cleanCol.includes('성적') || cleanCol.includes('원점수');
+                let isRank = cleanCol.includes('등수') || cleanCol.includes('석차');
+
+                let prefix = '';
+                let hasExplicitWeek = colName.match(/\d+(회|주)/);
+
+                if (isScore) {
+                    scoreCounter++;
+                    if (!hasExplicitWeek) {
+                        prefix = lastAboveWeek ? lastAboveWeek : `${scoreCounter}회차`;
+                    }
+                } else if (isRank) {
+                    rankCounter++;
+                    if (!hasExplicitWeek) {
+                        prefix = lastAboveWeek ? lastAboveWeek : `${rankCounter}회차`;
+                    }
+                }
+
+                let finalHeader = colName;
+                if (prefix && !colName.includes(prefix)) {
+                    finalHeader = prefix + '_' + colName;
+                } else if (!finalHeader) {
+                    finalHeader = `__EMPTY_${c}`;
+                }
+
+                let counter = 1;
+                let originalHeader = finalHeader;
+                while (actualHeaders.includes(finalHeader)) {
+                    finalHeader = originalHeader + '_' + counter;
+                    counter++;
+                }
+                actualHeaders.push(finalHeader);
+            }
+
+            const jsonData = [];
+            for (let i = headerRowIndex + 1; i < rawArray.length; i++) {
+                const rowArr = rawArray[i];
+                if (!rowArr || rowArr.length === 0 || rowArr.every(c => !c)) continue;
+                let rowObj = {};
+                for (let c = 0; c < actualHeaders.length; c++) {
+                    rowObj[actualHeaders[c]] = rowArr[c];
+                }
+                jsonData.push(rowObj);
+            }
+
+            if (jsonData.length === 0) {
+                throw new Error('스프레드시트에서 학생 데이터를 찾을 수 없습니다.');
+            }
+
+            appData.students = [];
+            appData.allWeeks = [];
+            let updateCount = 0;
+
+            jsonData.forEach(row => {
+                const name = getVal(row, ['이름', '성명', '학생명', '원생명']);
+                if (!name) return;
+
+                const school = getVal(row, ['학교', '소속학교', '학교학년', '학교/학년']);
+                const grade = getVal(row, ['학년']);
+                let schoolGrade = '';
+                if (school && grade) {
+                    schoolGrade = school.includes(grade) ? school : `${school} ${grade}`;
+                } else {
+                    schoolGrade = school || grade || '';
+                }
+
+                const teacher = getVal(row, ['담당t', '담당', '담임']);
+                const className = getVal(row, ['학원반', '반', '반명', '분반']);
+
+                let student = appData.students.find(s => s.name === name);
+                if (!student) {
+                    student = { name, schoolGrade, teacher, className, scores: [] };
+                    appData.students.push(student);
+                } else {
+                    if (schoolGrade) student.schoolGrade = schoolGrade;
+                    if (teacher) student.teacher = teacher;
+                    if (className) student.className = className;
+                }
+
+                updateCount++;
+
+                Object.keys(row).forEach(key => {
+                    const cleanKey = key.replace(/\s/g, '').toLowerCase();
+                    const skipKeys = ['이름', '성명', '학교', '학년', '담당t', '담당', '담임', '학원반', '반', '연번', 'no', '비고', '연락처'];
+                    if (skipKeys.some(s => cleanKey === s || cleanKey.includes(s))) return;
+                    if (cleanKey.includes('평균') || cleanKey.includes('총점') || cleanKey.includes('합계') || cleanKey.includes('전체')) return;
+
+                    let val = parseFloat(row[key]);
+                    if (isNaN(val)) return;
+
+                    let isRank = cleanKey.includes('등수') || cleanKey.includes('석차') || cleanKey.endsWith('등');
+                    let isScore = cleanKey.includes('점수') || cleanKey.includes('성적') || cleanKey.includes('원점수') || cleanKey.match(/\d+/);
+
+                    if (isRank || isScore || typeof val === 'number') {
+                        let sessionNameMatch = key.match(/(\d+)(회|주)차?/);
+                        let sessionName = sessionNameMatch ? sessionNameMatch[1] + sessionNameMatch[2] + '차' : '1회차';
+
+                        if (!appData.allWeeks.includes(sessionName)) appData.allWeeks.push(sessionName);
+
+                        let scoreObj = student.scores.find(s => s.week === sessionName);
+                        if (!scoreObj) {
+                            scoreObj = { week: sessionName, score: null, rank: null };
+                            student.scores.push(scoreObj);
+                        }
+
+                        if (isRank) scoreObj.rank = val;
+                        else scoreObj.score = val;
+                    }
+                });
+            });
+
+            appData.allWeeks.sort((a, b) => {
+                const numA = parseInt(String(a).replace(/[^0-9]/g, '')) || 0;
+                const numB = parseInt(String(b).replace(/[^0-9]/g, '')) || 0;
+                return numA - numB;
+            });
+
+            appData.files = [{
+                id: Date.now(),
+                name: '🌐 구글 스프레드시트 프리미엄 연동',
+                date: new Date().toLocaleString(),
+                size: sourceLabel
+            }];
+
+            return updateCount;
+        }
+
+        window.syncGoogleSheet = async function() {
+            const urlInput = document.getElementById('sheetUrlInput').value.trim();
+            if (!urlInput) {
+                window.showModal('입력 확인', '구글 스프레드시트 링크를 정확히 입력해주세요.', 'error');
+                return;
+            }
+
+            appData.sheetUrl = urlInput;
+            window.showModal('스마트 데이터 연동 중', '열린학원 시스템이 구글 스프레드시트를 분석하고 있습니다...\n잠시만 기다려주세요.', 'info');
+
+            try {
+                const payload = await fetchSpreadsheetViaAppsScript(urlInput);
+                let rawValues = payload && payload.values ? payload.values : [];
+                if (typeof rawValues === 'string') {
+                    try { rawValues = JSON.parse(rawValues); } catch (e) {}
+                }
+                const updateCount = processRawSpreadsheetRows(rawValues, payload.source || '스마트 시트 연동');
+
+                setupFilters();
+                updateDashboard();
+                renderFiles();
+
+                document.getElementById('customModal').classList.add('hidden');
+                setTimeout(() => {
+                    const sheetLabel = payload.sheetName ? `\n연동된 탭: ${payload.sheetName}` : '';
+                    window.showModal('데이터 연동 성공', `[${window.CURRENT_EXAM} - ${window.CURRENT_GRADE}] 완벽하게 연동되었습니다!\n총 ${updateCount}명의 성적이 분석 시스템에 반영되었습니다.${sheetLabel}`, 'success');
+                }, 300);
+
+                saveToCloud().catch(err => console.error('Save failed:', err));
+            } catch (err) {
+                console.error('Sync Error:', err);
+                document.getElementById('customModal').classList.add('hidden');
+                setTimeout(() => {
+                    window.showModal('연동 오류', `데이터를 가져오지 못했습니다.\n\n상세원인: ${err.message}`, 'error');
+                }, 300);
+            }
+        };
+
+        window.switchTab = function(tabId) {
+            ['dashboard', 'report', 'admin'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.add('hidden');
+                const btn = document.getElementById(`btn-tab-${t}`);
+                if (t === tabId) {
+                    btn.classList.add('bg-indigo-900', 'text-white', 'shadow-sm');
+                    btn.classList.remove('text-gray-600', 'hover:bg-gray-100');
+                } else {
+                    btn.classList.remove('bg-indigo-900', 'text-white', 'shadow-sm');
+                    btn.classList.add('text-gray-600', 'hover:bg-gray-100');
+                }
+            });
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+        };
+
+        window.clearAllData = function() {
+            window.showModal('⚠️ 데이터 전체 초기화', `현재 클라우드에 저장된 [${window.CURRENT_EXAM}] - [${window.CURRENT_GRADE}]의 모든 데이터를 영구적으로 삭제합니다.\n(다른 학년 데이터는 보호됩니다)\n\n정말 초기화 하시겠습니까?`, 'error', async () => {
+                appData = { files: [], students: [], allWeeks: [], sheetUrl: "" };
+                document.getElementById('sheetUrlInput').value = '';
+                await saveToCloud();
+                setupFilters();
+                updateDashboard();
+                renderFiles();
+                window.showModal('초기화 완료', '모든 데이터가 깨끗하게 지워졌습니다.\n새로운 구글 시트 링크를 넣어주세요.', 'success');
+            });
+        };
+
+        window.handleSearch = function() {
+            const searchName = document.getElementById('searchName').value.trim();
+            const student = appData.students.find(s => s.name === searchName || s.name.includes(searchName));
+
+            if (!student || searchName === '') {
+                window.showModal('학생 찾기 실패', '해당 이름의 학생을 찾을 수 없습니다.\n이름을 다시 한번 확인해 주세요.', 'error');
+                document.getElementById('reportEmpty').classList.remove('hidden');
+                document.getElementById('reportContent').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('reportEmpty').classList.add('hidden');
+            document.getElementById('reportContent').classList.remove('hidden');
+
+            document.getElementById('reportName').innerText = student.name;
+            document.getElementById('reportSchool').innerText = student.schoolGrade || '-';
+            
+            const classNameDisplay = student.className || '-';
+            document.getElementById('reportClass').innerText = classNameDisplay;
+            document.getElementById('reportClassNameTitle').innerText = student.className ? `[${student.className}]` : '소속반';
+            
+            let teacherName = student.teacher ? student.teacher.replace(/[Tt]$/, '') : '';
+            document.getElementById('reportTeacher').innerText = teacherName ? `${teacherName} T` : '-';
+
+            document.getElementById('reportScoresTable').innerHTML = appData.allWeeks.map(w => {
+                const s = student.scores.find(x => x.week === w) || {score: null, rank: null};
+                return `
+                <tr>
+                    <td class="py-3 print:py-2 px-4 text-gray-700 bg-gray-50/80 border-b">${w}</td>
+                    <td class="py-3 print:py-2 px-4 font-extrabold text-lg text-indigo-800 border-b">${s.score !== null ? s.score + '점' : '-'}</td>
+                    <td class="py-3 print:py-2 px-4 font-bold text-lg text-gray-600 border-b">${s.rank !== null ? s.rank + '등' : '-'}</td>
+                </tr>`
+            }).join('');
+
+            const classStudents = appData.students.filter(s => s.className === student.className && student.className);
+            const classAvgs = appData.allWeeks.map(w => {
+                let total = 0, count = 0;
+                classStudents.forEach(cs => {
+                    const cScore = cs.scores.find(x => x.week === w);
+                    if (cScore && cScore.score !== null) { total += cScore.score; count++; }
+                });
+                return { week: w, avg: count > 0 ? (total / count).toFixed(1) : '-' };
+            });
+
+            document.getElementById('reportClassAvgTable').innerHTML = classAvgs.map(ca => `
+                <tr>
+                    <td class="py-2 px-3 text-gray-700 bg-gray-50/50 border-b">${ca.week}</td>
+                    <td class="py-2 px-3 font-extrabold text-blue-800 border-b">${ca.avg !== '-' ? ca.avg + '점' : '-'}</td>
+                </tr>
+            `).join('');
+
+            const ctx = document.getElementById('reportChart').getContext('2d');
+            if (reportChartInstance) reportChartInstance.destroy();
+            
+            const validScores = appData.allWeeks.map(w => {
+                const s = student.scores.find(x => x.week === w);
+                return s && s.score !== null ? s.score : null;
+            });
+
+            const classAvgChartData = classAvgs.map(ca => ca.avg !== '-' ? parseFloat(ca.avg) : null);
+
+            reportChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: appData.allWeeks,
+                    datasets: [
+                        {
+                            label: '학생 취득 점수',
+                            data: validScores,
+                            backgroundColor: '#312e81', 
+                            borderRadius: 6,
+                            borderSkipped: false,
+                            maxBarThickness: 35
+                        },
+                        {
+                            label: '그룹(반) 평균',
+                            data: classAvgChartData,
+                            backgroundColor: '#93c5fd', 
+                            borderRadius: 6,
+                            borderSkipped: false,
+                            maxBarThickness: 35
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { 
+                        y: { 
+                            beginAtZero: true, 
+                            max: 100,
+                            grid: { color: '#f1f5f9', borderDash: [5, 5] },
+                            ticks: { font: { weight: 'bold', family: 'sans-serif' } }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { weight: 'bold', family: 'sans-serif' } }
+                        }
+                    },
+                    plugins: {
+                        legend: { 
+                            position: 'top',
+                            align: 'end',
+                            labels: { usePointStyle: true, boxWidth: 8, font: { weight: 'bold' } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                            titleFont: { size: 13, weight: 'bold' },
+                            bodyFont: { size: 14, weight: 'bold' },
+                            padding: 12,
+                            cornerRadius: 8,
+                            displayColors: false
+                        }
+                    }
+                }
+            });
+        };
+
+        function setupFilters() {
+            const getUnique = (key) => {
+                const uniqueVals = [...new Set(appData.students.map(s => s[key]).filter(Boolean))].sort();
+                return ['전체', ...uniqueVals];
+            };
+            
+            const populate = (id, options) => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.innerHTML = options.map(opt => `<option value="${opt}">${opt}</option>`).join('');
+                    el.removeEventListener('change', updateDashboard);
+                    el.addEventListener('change', updateDashboard);
+                    el.value = '전체';
+                }
+            };
+
+            populate('filterName', getUnique('name'));
+            populate('filterSchoolGrade', getUnique('schoolGrade'));
+            populate('filterTeacher', getUnique('teacher'));
+            populate('filterClass', getUnique('className'));
+        }
+
+        function updateDashboard() {
+            const fName = document.getElementById('filterName')?.value || '전체';
+            const fSchoolGrade = document.getElementById('filterSchoolGrade')?.value || '전체';
+            const fTeacher = document.getElementById('filterTeacher')?.value || '전체';
+            const fClass = document.getElementById('filterClass')?.value || '전체';
+
+            // 🖨️ 대시보드 스마트 출력 타이틀 생성
+            let gradeStr = window.CURRENT_GRADE.replace('고', '') + '학년';
+            let titleParts = [gradeStr];
+            if (fSchoolGrade !== '전체') titleParts.push(fSchoolGrade);
+            if (fClass !== '전체') titleParts.push(fClass);
+            if (fTeacher !== '전체') titleParts.push(fTeacher.replace(/[Tt]$/, '') + 'T');
+            
+            let printTitle = "";
+            if (titleParts.length === 1 && fName === '전체') {
+                printTitle = `${gradeStr} 전체성적`;
+            } else {
+                printTitle = `${titleParts.join(' ')} 성적`;
+            }
+            const printTitleEl = document.getElementById('dashboardPrintTitle');
+            if(printTitleEl) printTitleEl.innerText = printTitle;
+
+
+            let filtered = appData.students.filter(s => 
+                (fName === '전체' || s.name === fName) &&
+                (fSchoolGrade === '전체' || s.schoolGrade === fSchoolGrade) &&
+                (fTeacher === '전체' || s.teacher === fTeacher) &&
+                (fClass === '전체' || s.className === fClass)
+            );
+
+            filtered.sort((a, b) => {
+                let valA, valB;
+                if (window.currentSortCol === '이름') { valA = a.name; valB = b.name; }
+                else if (window.currentSortCol === '학교/학년') { valA = a.schoolGrade || ''; valB = b.schoolGrade || ''; }
+                else if (window.currentSortCol === '반/담당T') { valA = a.className || ''; valB = b.className || ''; }
+                else {
+                    valA = a.scores.find(x => x.week === window.currentSortCol)?.score ?? -1;
+                    valB = b.scores.find(x => x.week === window.currentSortCol)?.score ?? -1;
+                    
+                    if (valA === valB) return 0;
+                    if (valA < valB) return window.currentSortAsc ? -1 : 1;
+                    return window.currentSortAsc ? 1 : -1;
+                }
+                
+                if (valA === valB) return 0;
+                if (valA < valB) return window.currentSortAsc ? -1 : 1;
+                return window.currentSortAsc ? 1 : -1;
+            });
+
+            document.getElementById('filteredCount').innerText = filtered.length;
+
+            const weeks = appData.allWeeks;
+            const trendData = weeks.map(week => {
+                let total = 0, count = 0;
+                filtered.forEach(s => {
+                    const sc = s.scores.find(x => x.week === week);
+                    if(sc && sc.score !== null) { total += sc.score; count++; }
+                });
+                return count > 0 ? (total / count).toFixed(1) : 0;
+            });
+
+            document.getElementById('recentAvg').innerText = weeks.length > 0 ? trendData[trendData.length - 1] : 0;
+
+            const latestWeek = weeks.length > 0 ? weeks[weeks.length - 1] : null;
+            let classSummaryHtml = '';
+
+            if (latestWeek && filtered.length > 0) {
+                let classGroups = {};
+                filtered.forEach(s => {
+                    const cName = s.className || '미배정';
+                    if (!classGroups[cName]) classGroups[cName] = [];
+                    const sc = s.scores.find(x => x.week === latestWeek);
+                    if (sc && sc.score !== null) {
+                        classGroups[cName].push({ name: s.name, score: sc.score });
+                    }
+                });
+
+                const cards = Object.keys(classGroups).sort().map(cName => {
+                    const students = classGroups[cName];
+                    if (students.length === 0) return '';
+                    const avg = (students.reduce((sum, st) => sum + st.score, 0) / students.length).toFixed(1);
+                    
+                    students.sort((a, b) => b.score - a.score);
+                    const top3 = students.slice(0, 3);
+                    
+                    return `
+                        <div class="min-w-[240px] bg-white p-5 rounded-xl border border-gray-200 flex-shrink-0 flex flex-col shadow-sm hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-center border-b border-gray-100 pb-3 mb-3 gap-2">
+                                <h4 class="font-extrabold text-gray-800 text-base truncate" title="${cName}">${cName}</h4>
+                                <span class="bg-indigo-100 text-indigo-800 text-[11px] px-2.5 py-1 rounded-full font-bold shadow-sm shrink-0 border border-indigo-200">평균 ${avg}점</span>
+                            </div>
+                            <ul class="space-y-2 flex-1">
+                                ${top3.map((st, idx) => `
+                                    <li class="text-sm flex justify-between items-center bg-gray-50/80 p-2.5 rounded-lg border border-gray-100">
+                                        <span class="${idx === 0 ? 'text-indigo-900 font-extrabold' : 'text-gray-700 font-bold'} flex items-center">
+                                            <span class="mr-2 text-base drop-shadow-sm">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span> ${st.name}
+                                        </span>
+                                        <span class="font-extrabold ${idx === 0 ? 'text-indigo-900' : 'text-gray-700'}">${st.score}점</span>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }).join('');
+                
+                if(cards) {
+                    classSummaryHtml = `
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center w-full">
+                            <i data-lucide="award" class="w-5 h-5 mr-2 text-indigo-600"></i>
+                            반별 요약 및 우수자 <span class="text-xs font-bold text-indigo-700 ml-2 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100">최근 ${latestWeek} 기준</span>
+                        </h3>
+                        <div class="flex gap-4 overflow-x-auto custom-scrollbar w-full pb-4">
+                            ${cards}
+                        </div>
+                    `;
+                } else {
+                    classSummaryHtml = `<div class="text-gray-500 text-center w-full p-8 font-medium">해당 회차에 점수 데이터가 없습니다.</div>`;
+                }
+            } else {
+                classSummaryHtml = `<div class="text-gray-500 text-center w-full p-8 font-medium bg-gray-50 rounded-lg">등록된 데이터가 없습니다.</div>`;
+            }
+            
+            const summaryContainer = document.getElementById('classSummaryContainer');
+            if(summaryContainer) summaryContainer.innerHTML = classSummaryHtml;
+
+            const getSortIcon = (col) => {
+                if (window.currentSortCol !== col) return '<span class="text-gray-300 ml-1 text-xs">↕</span>';
+                return window.currentSortAsc ? '<span class="text-indigo-600 ml-1 text-xs font-bold">▲</span>' : '<span class="text-indigo-600 ml-1 text-xs font-bold">▼</span>';
+            };
+
+            const headerRow = document.getElementById('tableHeaderRow');
+            if (headerRow) {
+                // 🖨️ 이름, 학교/학년 가운데 정렬, 반/담당T 왼쪽 정렬 적용, 모든 회차 열에 session-col 클래스 부여
+                headerRow.innerHTML = `
+                    <th class="px-6 py-4 min-w-[100px] border-r border-gray-200 cursor-pointer hover:bg-gray-200 transition-colors whitespace-nowrap text-center" onclick="window.sortTable('이름')">이름 ${getSortIcon('이름')}</th>
+                    <th class="px-6 py-4 min-w-[140px] border-r border-gray-200 cursor-pointer hover:bg-gray-200 transition-colors whitespace-nowrap text-center" onclick="window.sortTable('학교/학년')">학교/학년 ${getSortIcon('학교/학년')}</th>
+                    <th class="px-6 py-4 min-w-[140px] border-r border-gray-200 cursor-pointer hover:bg-gray-200 transition-colors whitespace-nowrap text-left" onclick="window.sortTable('반/담당T')">반/담당T ${getSortIcon('반/담당T')}</th>
+                    ${weeks.map(w => `
+                        <th class="px-6 py-4 text-center min-w-[90px] text-indigo-900 bg-indigo-50/50 cursor-pointer hover:bg-indigo-100 transition-colors whitespace-nowrap session-col" onclick="window.sortTable('${w}')">${w} 점수 ${getSortIcon(w)}</th>
+                        <th class="px-6 py-4 text-center min-w-[90px] border-r border-gray-200 whitespace-nowrap session-col">${w} 등수</th>
+                    `).join('')}
+                `;
+            }
+
+            const tbody = document.getElementById('dashboardTableBody');
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="${3 + (weeks.length * 2)}" class="px-6 py-12 text-center text-gray-500 text-base font-medium">데이터가 없습니다. [데이터 관리] 탭에서 구글 시트를 연동해주세요.</td></tr>`;
+            } else {
+                tbody.innerHTML = filtered.map((s, idx) => {
+                    const schoolGradeDisplay = s.schoolGrade || '-';
+                    let displayTeacher = s.teacher ? s.teacher.replace(/[Tt]$/, '') + 'T' : '';
+                    const classTeacher = [s.className, displayTeacher].filter(Boolean).join(' <span class="text-gray-300 mx-1">|</span> ') || '-';
+                    
+                    // 🖨️ 이름, 학교/학년 가운데 정렬, 반/담당T 왼쪽 정렬 적용, 모든 회차 열에 session-col 클래스 부여
+                    return `
+                    <tr class="border-b border-gray-100 hover:bg-indigo-50/40 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}">
+                        <td class="px-6 py-4 font-extrabold text-gray-900 border-r border-gray-100 whitespace-nowrap text-center">${s.name}</td>
+                        <td class="px-6 py-4 text-gray-700 font-medium border-r border-gray-100 whitespace-nowrap text-center">${schoolGradeDisplay}</td>
+                        <td class="px-6 py-4 text-gray-700 font-medium border-r border-gray-100 whitespace-nowrap text-left">${classTeacher}</td>
+                        ${weeks.map(w => {
+                            const sc = s.scores.find(x => x.week === w);
+                            const scoreStr = (sc && sc.score !== null) ? sc.score + '점' : '-';
+                            const rankStr = (sc && sc.rank !== null) ? sc.rank + '등' : '-';
+                            return `
+                                <td class="px-6 py-4 text-center font-extrabold text-indigo-900 bg-indigo-50/20 whitespace-nowrap session-col">${scoreStr}</td>
+                                <td class="px-6 py-4 text-center font-bold text-gray-500 border-r border-gray-100 whitespace-nowrap session-col">${rankStr}</td>
+                            `;
+                        }).join('')}
+                    </tr>
+                `}).join('');
+            }
+
+            // 🖨️ 대시보드 하단 전체평균 (tfoot) 생성
+            const tfoot = document.getElementById('dashboardTableFoot');
+            if (filtered.length > 0 && weeks.length > 0) {
+                // (00명) 타이틀 제거
+                let tfootHtml = `<tr>
+                    <td colspan="3" class="px-6 py-4 text-center text-base tracking-wide border-r border-gray-200 whitespace-nowrap bg-gray-50 font-extrabold">
+                        필터링된 그룹 전체 평균
+                    </td>`;
+                
+                weeks.forEach(w => {
+                    let sum = 0, count = 0;
+                    filtered.forEach(s => {
+                        const sc = s.scores.find(x => x.week === w);
+                        if (sc && sc.score !== null) { sum += sc.score; count++; } // 여기서 count가 실제 응시생 수!
+                    });
+                    let avg = count > 0 ? (sum / count).toFixed(1) + '점' : '-';
+                    // 등수 칸에 응시생 수(count) 표시
+                    tfootHtml += `
+                        <td class="px-6 py-4 text-center text-lg text-indigo-900 border-r border-gray-200 whitespace-nowrap bg-gray-50 font-extrabold session-col">${avg}</td>
+                        <td class="px-6 py-4 text-center border-r border-gray-200 whitespace-nowrap bg-gray-50 session-col">
+                            <span class="text-xs font-bold text-gray-600 bg-gray-200 px-2 py-1 rounded-md">응시 ${count}명</span>
+                        </td>
+                    `;
+                });
+                tfootHtml += `</tr>`;
+                tfoot.innerHTML = tfootHtml;
+                tfoot.classList.remove('hidden');
+            } else {
+                tfoot.innerHTML = '';
+                tfoot.classList.add('hidden');
+            }
+
+            lucide.createIcons();
+        }
+
+        function renderFiles() {
+            const list = document.getElementById('fileList');
+            if (appData.files.length === 0) {
+                list.innerHTML = `<li class="p-8 text-center text-gray-500 font-medium bg-gray-50/50">연동된 구글 스프레드시트가 없습니다.<br/>위 입력창에 링크를 넣고 [스마트 데이터 연동]을 눌러주세요.</li>`;
+                return;
+            }
+            list.innerHTML = appData.files.map(file => `
+                <li class="p-6 flex items-center justify-between hover:bg-indigo-50/30 transition-colors border-b border-gray-100 bg-white">
+                    <div class="flex items-center">
+                        <div class="p-3 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-xl mr-4 shadow-sm">
+                            <i data-lucide="cloud-cog" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <p class="font-extrabold text-gray-800 text-base">${file.name}</p>
+                            <p class="text-xs text-gray-500 mt-1 font-medium">마지막 동기화: ${file.date}</p>
+                        </div>
+                    </div>
+                    <div class="px-4 py-1.5 bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-extrabold rounded-full shadow-sm">
+                        ${file.size}
+                    </div>
+                </li>
+            `).join('');
+            lucide.createIcons();
+        }
+    </script>
+</body>
+</html>
