@@ -120,7 +120,8 @@
                 <div class="flex space-x-2" id="grade-selector">
                     <button onclick="window.changeGrade('고1')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold active shadow-sm" id="btn-고1">고1</button>
                     <button onclick="window.changeGrade('고2')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold shadow-sm" id="btn-고2">고2</button>
-                    <button onclick="window.changeGrade('고3')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold shadow-sm" id="btn-고3">고3</button>
+                    <button onclick="window.changeGrade('고3 미적')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold shadow-sm" id="btn-고3미적">고3 미적</button>
+                    <button onclick="window.changeGrade('고3 확통')" class="grade-btn px-4 py-1.5 border rounded-full text-xs font-bold shadow-sm" id="btn-고3확통">고3 확통</button>
                 </div>
             </div>
         </div>
@@ -415,7 +416,7 @@
         window.currentSortAsc = true; 
         
         // 🔑 시크릿 공간 비밀번호 설정 (초기값: 1234)
-        window.SECRET_PASSWORD = '1234';
+        window.SECRET_PASSWORD = '1206';
         window.isSecretUnlocked = false;
         // =========================================================================
         
@@ -652,9 +653,11 @@
 
         window.changeGrade = function(grade) {
             window.CURRENT_GRADE = grade;
+            // 버튼 ID 매칭을 위해 띄어쓰기 제거 (예: '고3 미적' -> '고3미적')
+            const safeId = grade.replace(/\s+/g, '');
             
             document.querySelectorAll('.grade-btn').forEach(btn => btn.classList.remove('active'));
-            const activeBtn = document.getElementById(`btn-${grade}`);
+            const activeBtn = document.getElementById(`btn-${safeId}`);
             if(activeBtn) activeBtn.classList.add('active');
 
             document.getElementById('ui-grade-title').innerText = `[${grade}]`;
