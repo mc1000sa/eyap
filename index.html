@@ -416,7 +416,7 @@
         window.currentSortAsc = true; 
         
         // 🔑 시크릿 공간 비밀번호 설정 (초기값: 1234)
-        window.SECRET_PASSWORD = '1206';
+        window.SECRET_PASSWORD = '1234';
         window.isSecretUnlocked = false;
         // =========================================================================
         
@@ -1271,8 +1271,12 @@
             const fTeacher = document.getElementById('filterTeacher')?.value || '전체';
             const fClass = document.getElementById('filterClass')?.value || '전체';
 
-            // 🖨️ 대시보드 스마트 출력 타이틀 생성
-            let gradeStr = window.CURRENT_GRADE.replace('고', '') + '학년';
+            // 🖨️ 대시보드 스마트 출력 타이틀 생성 (고3 미적/확통 글자 순서 완벽 교정)
+            let rawGradeStr = window.CURRENT_GRADE.replace('고', '');
+            let gradeStr = rawGradeStr.includes(' ') 
+                ? `${rawGradeStr.split(' ')[0]}학년 ${rawGradeStr.split(' ')[1]}`
+                : `${rawGradeStr}학년`;
+            
             let titleParts = [gradeStr];
             if (fSchoolGrade !== '전체') titleParts.push(fSchoolGrade);
             if (fClass !== '전체') titleParts.push(fClass);
